@@ -1,37 +1,100 @@
 package io.github.immaculate.orderservice.service.impl;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.beans.BeanUtils;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import io.github.immaculate.orderservice.entity.Order;
 import io.github.immaculate.orderservice.entity.OrderItem;
+import io.github.immaculate.orderservice.exception.InventoryServiceException;
+import io.github.immaculate.orderservice.exception.NotEnoughQuantityException;
+import io.github.immaculate.orderservice.exception.OrderServiceException;
+import io.github.immaculate.orderservice.model.GenericResponse;
 import io.github.immaculate.orderservice.model.OrderItemRequest;
 import io.github.immaculate.orderservice.model.OrderRequest;
 import io.github.immaculate.orderservice.repository.OrderRepository;
 import io.github.immaculate.orderservice.service.OrderService;
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
+
 
 @Service
-public class OrderServiceImpl implements OrderService{
+@Slf4j
+public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
+    private final WebClient webClient;
 
-    public OrderServiceImpl(OrderRepository orderRepository){
-        this.orderRepository=orderRepository;
+    public OrderServiceImpl(OrderRepository orderRepository, WebClient webClient) {
+        this.orderRepository = orderRepository;
+        this.webClient = webClient;
     }
 
     @Override
-    public void placeOrder(OrderRequest orderRequest) {
-       Order order = new Order();
-       order.setOrderNumber(UUID.randomUUID().toString());
-       order.setOrderTime(Instant.now());
-       var orderItems = orderRequest.getOrderItems().stream().map(this::mapToOrderItemEntity).toList();
-       order.setOrderItems(orderItems);
-       orderRepository.save(order);
+    public String placeOrder(OrderRequest orderRequest) {
+        Order order = new Order();
+
+        // Checks
+        // ! All products exists in the inventory
+        // http://localhost:6002/api/inventory/check
+        // restTemplate
+
+        List<String> productCodes = new ArrayList<>();
+        List<Integer> productQuantities = new ArrayList<>();
+
+        for (OrderItemRequest orderItemRequest : orderRequest.getOrderItems()) {
+            productCodes.add(orderItemRequest.getProductCode());
+            productQuantities.add(orderItemRequest.getQuantity());
+        }
+        log.info("productCodes", productCodes);
+        log.info("productQuantities", productQuantities);
+        GenericResponse<?> response = webClient.get()
+                .uri("http://localhost:6002/api/inventory/check",
+                        uriBuilder -> uriBuilder
+                                .queryParam("productCodes", productCodes)
+                                .queryParam("productQuantities", productQuantities)
+                                .build())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, clientResponse -> handleError(clientResponse))
+                .bodyToMono(new ParameterizedTypeReference<GenericResponse<Boolean>>() {
+                })
+                .block();
+        if (response.isSuccess()) {
+            // stock
+            order.setOrderNumber(UUID.randomUUID().toString());
+            order.setOrderTime(Instant.now());
+            var orderItems = orderRequest.getOrderItems().stream().map(this::mapToOrderItemEntity).toList();
+            order.setOrderItems(orderItems);
+            orderRepository.save(order);
+             //TODO: make the call to inventory to reduce quantity
+            //TODO: process payment for an order
+            return order.getOrderNumber();
+        } else {
+          log.error("Not Enough stock");
+            log.info("{}", response.getData());
+            if(response.getData() instanceof Map){
+                throw new NotEnoughQuantityException(response.getMsg(),(Map<String, Integer>) response.getData());
+            }
+            throw new OrderServiceException(response.getMsg());
+        }
+
     }
-    private OrderItem mapToOrderItemEntity(OrderItemRequest itemRequest){
+
+     private Mono<? extends Throwable> handleError(ClientResponse response) {
+        log.error("Client error received: {}", response.statusCode());
+        return Mono.error(new InventoryServiceException("Error in inventory service"));
+    }
+
+    private OrderItem mapToOrderItemEntity(OrderItemRequest itemRequest) {
         OrderItem orderItem = new OrderItem();
         BeanUtils.copyProperties(itemRequest, orderItem);
         return orderItem;
