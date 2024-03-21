@@ -6,11 +6,18 @@ spring:
     username: root
     password: generic
   application:
-    name: product-service
+    name: order-service
   jpa:
     show-sql: true
     hibernate:
       ddl-auto: update
       dialect: org.hibernate.dialect.MySQLDialect
       
+eureka:
+  client:
+    enabled: true
+    fetch-registry: true
+    register-with-eureka: true
+    service-url:
+      defaultZone: http://localhost:8761/eureka
 
