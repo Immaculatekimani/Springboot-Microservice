@@ -1,0 +1,11 @@
+server:
+  port: 8888
+spring:
+  application:
+    name: online-shopping-config-server
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/Immaculatekimani/Microservices-Configurations
+          default-label: main
