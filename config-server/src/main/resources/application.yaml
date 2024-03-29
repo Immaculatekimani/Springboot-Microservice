@@ -9,3 +9,17 @@ spring:
         git:
           uri: https://github.com/Immaculatekimani/Microservices-Configurations
           default-label: main
+          skipSslValidation: true
+          force-pull: true
+          timeout: 5 #default
+          clone-on-start: true
+          search-paths: '\{application}'
+          deleteUntrackedBranches: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+eureka:
+    fetch-registry: false
+    register-with-eureka: false
